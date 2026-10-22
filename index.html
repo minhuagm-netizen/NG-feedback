@@ -214,7 +214,10 @@ const today=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const lab=(list,tw)=>{const t=list.find(x=>x[0]===tw);return t?t[1]:tw};
 const dMeta=()=>({model:'',part:'',partOther:'',cmf:[],cmfOther:'',color:'',colorOther:'',stage:'',doe:'',scene:'',sceneOther:''});
-let S={v:2,meta:dMeta(),samples:[1],cur:1,zones:{},unit:'cm'};
+const newS=()=>({v:2,meta:dMeta(),samples:[1],cur:1,labels:{},zones:{},unit:'cm'});
+let S=newS();
+const slab=n=>(S.labels&&S.labels[n])||String(n);
+const sortS=()=>S.samples.sort((a,b)=>slab(a).localeCompare(slab(b),undefined,{numeric:true,sensitivity:'base'}));
 const photos={};let db=null,ed=null;
 
 /* ---------------- 本机存储 (IndexedDB) ---------------- */
@@ -232,10 +235,12 @@ function normE(e){if(!e.pts||!e.pts.length)e.pts=[{types:(e.types||[]).slice(),o
 function adopt(o){ // 套用保存的资料（仅 v2）
  if(!o||o.v!==2)return;
  S=Object.assign(S,o);
+ if(!S.labels)S.labels={};
  Object.keys(S.zones||{}).forEach(k=>S.zones[k].entries.forEach(normE));S.meta=Object.assign(dMeta(),o.meta||{});
  if(!Array.isArray(S.meta.cmf))S.meta.cmf=[];
  if(!S.samples||!S.samples.length)S.samples=[1];
  if(!S.samples.includes(S.cur))S.cur=S.samples[0];
+ sortS();
 }
 async function loadAll(){
  db=await openDB();if(!db)return;
@@ -263,12 +268,22 @@ function entryText(e,lang,sep){
  const a=pts.map((p,i)=>(pts.length>1?CIRC[i]+' ':'')+(ptText(p,lang)||(pts.length>1?'—':''))).filter(Boolean).join(sep);
  return [a,(e.note||'').trim()].filter(Boolean).join(sep)}
 const zpts=r=>r.entries.reduce((a,e)=>a+e.pts.length,0);
-const VER='版本 2026-10-19 · v2.5';
+const VER='版本 2026-10-22 · v2.7';
 function ask(msg,okLabel,danger){return new Promise(res=>{
  const ov=document.createElement('div');ov.className='dlg';
  ov.innerHTML='<div class="box"><p>'+esc(msg)+'</p><div class="row2"><button class="btn" data-d="0">取消</button><button class="btn '+(danger?'pri dngb':'pri')+'" data-d="1">'+esc(okLabel||'确定')+'</button></div></div>';
  ov.addEventListener('click',e=>{const d=e.target.dataset&&e.target.dataset.d;if(d===undefined)return;e.stopPropagation();ov.remove();res(d==='1')});
  document.body.appendChild(ov)})}
+function askText(msg,val,check){return new Promise(res=>{
+ const ov=document.createElement('div');ov.className='dlg';
+ ov.innerHTML='<div class="box"><p>'+esc(msg)+'</p><input class="oth" type="text" maxlength="8" value="'+esc(val)+'" style="margin:0 0 6px" autocomplete="off"><div class="err" style="color:var(--bad);font-size:14px;min-height:20px;margin-bottom:8px"></div><div class="row2"><button class="btn" data-d="0">取消</button><button class="btn pri" data-d="1">确定</button></div></div>';
+ const inp=ov.querySelector('input'),err=ov.querySelector('.err');
+ inp.addEventListener('input',()=>{const v=inp.value.replace(/[\\\/?*\[\]:']/g,'');if(v!==inp.value){inp.value=v;err.textContent='不能使用  \\  /  ?  *  [  ]  :  \' 这些符号'}else err.textContent=''});
+ ov.addEventListener('click',e=>{const d=e.target.dataset&&e.target.dataset.d;if(d===undefined)return;e.stopPropagation();
+  if(d==='0'){ov.remove();res(null);return}
+  const v=inp.value.trim(),m=check(v);if(m){err.textContent=m;return}
+  ov.remove();res(v)});
+ document.body.appendChild(ov);setTimeout(()=>{inp.focus();inp.select()},50)})}
 function toast(m,ms){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.t);if(ms!==0)toast.t=setTimeout(()=>t.style.display='none',ms||2200)}
 function untoast(){$('#toast').style.display='none'}
 function infoMissing(){const m=S.meta,a=[];
@@ -318,14 +333,15 @@ function vHome(){
  ${db?'':'<div class="warn">⚠ 本机无法自动保存。请不要关闭或刷新此页面，并尽快导出。</div>'}
  ${vInfo()}
  <h2>测试样品编号</h2>
- <div class="chips" style="margin-bottom:8px">${S.samples.map(n=>{const x=sstat(n);return `<button class="chip pri ${n===s?'on':''}" data-a="cur" data-n="${n}">#${n}${x.cnt?' ⚠':(x.done?' ✓':'')}</button>`}).join('')}${S.samples.length<MAXS?'<button class="chip" data-a="addS">＋ 样品</button>':''}</div>
- <h2>样品 #${s}：已检 ${st.done}/${st.all}，异常 ${st.cnt} 项</h2>
+ <div class="chips" style="margin-bottom:8px">${S.samples.map(n=>{const x=sstat(n);return `<button class="chip pri ${n===s?'on':''}" data-a="cur" data-n="${n}">#${esc(slab(n))}${x.cnt?' ⚠':(x.done?' ✓':'')}</button>`}).join('')}${S.samples.length<MAXS?'<button class="chip" data-a="addS">＋ 样品</button>':''}</div>
+ <div class="row2" style="margin-top:0"><button class="btn sm" data-a="renS">✎ 修改样品编号</button>${S.samples.length>1?'<button class="btn sm dng" data-a="delS">🗑 删除此样品</button>':'<span></span>'}</div>
+ <h2>样品 #${esc(slab(s))}：已检 ${st.done}/${st.all}，异常 ${st.cnt} 项</h2>
  <div class="card" style="padding:10px">
   <div class="legend" style="margin-top:0"><span>⬜ 未检</span><span style="color:var(--ok)">🟩 无异常</span><span style="color:var(--bad)">🟥 有异常</span><span>虚线框 = PL面</span><span>S/P 编号由上方起顺时针</span></div>
   ${vMap()}</div>
- <h2>样品 #${s} 各分区</h2>
+ <h2>样品 #${esc(slab(s))} 各分区</h2>
  ${GROUPS.map(g=>{const x=gstat(s,g);return `<div class="card gi"><div><b>${esc(g.cn)}</b><div class="muted">已检 ${x.done}/${x.all} · <span class="${x.cnt?'bad-t':''}">异常 ${x.cnt}</span> · ${g.codes[0]}–${g.codes[g.codes.length-1]}</div></div><button class="btn sm" data-a="allok" data-f="${g.id}">未检→无异常</button></div>`}).join('')}
- ${S.samples.length>1?`<div style="margin-top:8px"><button class="btn sm dng" data-a="delS">删除样品 #${s}</button></div>`:''}
+ 
  </div>
  <div class="muted" style="text-align:center;margin:-4px 0 8px">${VER}</div>
  <div class="bar"><div class="in"><a class="btn pri" href="#/review">查看汇总 / 导出 Excel</a></div></div>`}
@@ -335,7 +351,7 @@ function vZone(sid,gid,z){
  const r=zrec(sid,gid,z)||{ok:false,entries:[]};
  const i=ALLZ.findIndex(x=>x.g===gid&&x.z===z),prev=ALLZ[i-1],next=ALLZ[i+1];
  const has=r.entries.length>0,dd=`data-s="${sid}" data-f="${gid}" data-z="${z}"`;
- return `<div class="top"><a class="bk" href="#/">‹ 展开图</a><b>#${sid} · ${esc(g.cn)} · ${z}</b><span class="sp"></span></div><div class="pad">
+ return `<div class="top"><a class="bk" href="#/">‹ 展开图</a><b>#${esc(slab(sid))} · ${esc(g.cn)} · ${z}</b><span class="sp"></span></div><div class="pad">
  ${has?'':`<button class="btn ${r.ok?'':'okb'}" data-a="okZone" ${dd} style="margin-bottom:10px">${r.ok?'✓ 已标记无异常（点此取消）':'✓ 此区域无异常 → 下一区'}</button>`}
  <button class="btn pri" data-a="add" ${dd}>＋ 新增异常（拍照 / 填写）</button>
  <h2>本区异常（${r.entries.length}）</h2>
@@ -347,7 +363,7 @@ function vZone(sid,gid,z){
 
 function vEditor(){
  const d=ed.draft,g=grp(ed.fid);
- return `<div class="sheet"><div class="top"><button class="bk" data-a="edCancel">取消</button><b>#${ed.sid} · ${esc(g.cn)} · ${ed.z}</b><span class="sp"></span></div>
+ return `<div class="sheet"><div class="top"><button class="bk" data-a="edCancel">取消</button><b>#${esc(slab(ed.sid))} · ${esc(g.cn)} · ${ed.z}</b><span class="sp"></span></div>
  <div class="inner pad">
  <h4>① 拍照（异常处）<small>点照片可画圈标记（最多 ${MAXPH} 张）</small></h4>
  <div class="thumbs">${d.photos.map((p,n)=>`<div class="ph"><img data-a="annot" data-id="${p}" src="${photos[p]?photos[p].d:''}"><em>${n+1}</em><button data-a="rmph" data-id="${p}">✕</button></div>`).join('')}</div>
@@ -370,10 +386,10 @@ function vReview(){
  const miss=infoMissing(),I=infoTW();
  let list='',tot={bad:0,cnt:0};
  S.samples.forEach(s=>GROUPS.forEach(g=>g.codes.forEach(z=>{const r=zrec(s,g.id,z);if(r&&r.entries.length){tot.bad++;r.entries.forEach(e=>{tot.cnt+=e.pts.length;
-  list+=`<a class="card" href="#/zone/${s}/${g.id}/${z}" style="display:block"><b>#${s} · ${esc(g.cn)} · ${z}</b> <span class="muted" style="white-space:pre-line">${esc(entryText(e,'cn','\n'))}</span>
+  list+=`<a class="card" href="#/zone/${s}/${g.id}/${z}" style="display:block"><b>#${esc(slab(s))} · ${esc(g.cn)} · ${z}</b> <span class="muted" style="white-space:pre-line">${esc(entryText(e,'cn','\n'))}</span>
   <div class="thumbs" style="margin-top:8px">${e.photos.map(p=>photos[p]?`<img src="${photos[p].d}">`:'').join('')}</div></a>`})}})));
- const rows=S.samples.map(s=>{const x=sstat(s);return `<div class="kv"><span>样品 #${s}</span><b>已检 ${x.done}/${x.all} · <span class="${x.cnt?'bad-t':''}">异常 ${x.cnt}</span></b></div>`}).join('');
- const un=S.samples.filter(sActive).map(s=>{const x=sstat(s);return x.done<x.all?`#${s} 还有 ${x.all-x.done} 区未检`:''}).filter(Boolean);
+ const rows=S.samples.map(s=>{const x=sstat(s);return `<div class="kv"><span>样品 #${esc(slab(s))}</span><b>已检 ${x.done}/${x.all} · <span class="${x.cnt?'bad-t':''}">异常 ${x.cnt}</span></b></div>`}).join('');
+ const un=S.samples.filter(sActive).map(s=>{const x=sstat(s);return x.done<x.all?`#${slab(s)} 还有 ${x.all-x.done} 区未检`:''}).filter(Boolean);
  return `<div class="top"><a class="bk" href="#/">‹ 返回</a><b>汇总 / 导出</b><span class="sp"></span></div><div class="pad">
  <div class="card"><div class="kv"><span>机种</span><b>${esc(I.model)||'—'}</b></div><div class="kv"><span>部件 / 阶段</span><b>${esc(I.part)||'—'} / ${esc(I.stage)||'—'}</b></div>${rows}<div class="kv"><span>异常区域 / 异常点数</span><b class="${tot.cnt?'bad-t':''}">${tot.bad} / ${tot.cnt}</b></div></div>
  ${miss.length?`<div class="warn">基本资料还缺：${miss.join('、')}　<a href="#/" data-a="infoOpen" style="text-decoration:underline">去填写</a></div>`:''}
@@ -483,7 +499,7 @@ async function buildXlsx(){
   a.font={name:FONT,bold:true};b.font={name:FONT};b.alignment={wrapText:true,vertical:'middle'};a.fill=fill('FFE8EDF4');for(let c=1;c<=6;c++)cv.getCell(r,c).border=bd});
  const r0=3+mr.length+1;
  ['樣品編號','區域數','已檢','無異常','異常區域','異常點數'].forEach((h,i)=>{const c=cv.getCell(r0,i+1);c.value=h;c.font={name:FONT,bold:true};c.fill=fill('FFE8EDF4');c.border=bd;c.alignment={horizontal:'center'}});
- sams.forEach((s,i)=>{const x=sstat(s),r=r0+1+i;['#'+s,x.all,x.done,x.ok,x.bad,x.cnt].forEach((v,j)=>{const c=cv.getCell(r,j+1);c.value=v;c.font={name:FONT,color:(j===5&&v>0)?{argb:'FFD93025'}:undefined,bold:j===5&&v>0};c.border=bd;c.alignment={horizontal:'center'}})});
+ sams.forEach((s,i)=>{const x=sstat(s),r=r0+1+i;['#'+slab(s),x.all,x.done,x.ok,x.bad,x.cnt].forEach((v,j)=>{const c=cv.getCell(r,j+1);c.value=v;c.font={name:FONT,color:(j===5&&v>0)?{argb:'FFD93025'}:undefined,bold:j===5&&v>0};c.border=bd;c.alignment={horizontal:'center'}})});
  /* 異常清單 */
  const ls=wb.addWorksheet('異常清單');
  ls.columns=[{header:'序',width:6},{header:'樣品',width:8},{header:'分區',width:14},{header:'區域',width:8},{header:'異常點',width:9},{header:'異常現象',width:24},{header:'長',width:8},{header:'寬',width:8},{header:'單位',width:7},{header:'備註',width:30},{header:'照片數',width:8}];
@@ -492,7 +508,7 @@ async function buildXlsx(){
 
  sams.forEach(s=>GROUPS.forEach(g=>g.codes.forEach(z=>{const r=zrec(s,g.id,z);if(r)r.entries.forEach(e=>{e.pts.forEach((p,i)=>{n++;
   const ty=(p.types||[]).map(x=>x==='其他'?'其他'+(p.other?'('+p.other+')':''):x).join('/');
-  const row=ls.addRow([n,'#'+s,g.tw,z,e.pts.length>1?'點'+(i+1):'',ty,p.len||'',p.wid||'',(p.len||p.wid)?(p.unit||'cm'):'',i===0?(e.note||''):'',i===0?e.photos.length:'']);
+  const row=ls.addRow([n,'#'+slab(s),g.tw,z,e.pts.length>1?'點'+(i+1):'',ty,p.len||'',p.wid||'',(p.len||p.wid)?(p.unit||'cm'):'',i===0?(e.note||''):'',i===0?e.photos.length:'']);
   row.eachCell(c=>{c.font={name:FONT};c.border=bd;c.alignment={vertical:'middle',wrapText:true}})})})})));
  ls.views=[{state:'frozen',ySplit:1}];
  /* 各樣品：外觀展開圖（單頁：中間正面，四周 側牆 + PL面） */
@@ -505,11 +521,11 @@ async function buildXlsx(){
   x.fillStyle='#fff';x.font='bold '+Math.round(r*1.3)+'px sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(String(n),cx,cy+r*0.06);
   res(c.toDataURL('image/jpeg',0.82))}catch(e){res(p.d)}};im.onerror=()=>res(p.d);im.src=p.d}catch(e){res(p.d)}});
  for(const s of sams){
-  const ws=wb.addWorksheet('樣品#'+s,{views:[{zoomScale:80,showGridLines:false}]});
+  const ws=wb.addWorksheet('樣品#'+slab(s),{views:[{zoomScale:80,showGridLines:false}]});
   ws.columns=Array.from({length:TOTU},()=>({width:(UPX-5)/7}));
   ws.pageSetup={paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:1,margins:{left:.3,right:.3,top:.4,bottom:.4,header:.2,footer:.2}};
   const full=(r,v,h,font,al)=>{ws.mergeCells(r,1,r,TOTU);const c=ws.getCell(r,1);c.value=v;c.font=font;c.alignment=al;ws.getRow(r).height=h};
-  full(1,'筆電機殼外觀異常展開圖　樣品 #'+s+'　'+I.model,26,{name:FONT,bold:true,size:14},{horizontal:'center',vertical:'middle'});
+  full(1,'筆電機殼外觀異常展開圖　樣品 #'+slab(s)+'　'+I.model,26,{name:FONT,bold:true,size:14},{horizontal:'center',vertical:'middle'});
   full(2,['部件：'+I.part,'CMF：'+I.cmf,I.color?'顏色：'+I.color:'','階段：'+I.stage,'情境：'+I.scene,'日期：'+date].filter(Boolean).join('　｜　'),32,{name:FONT,size:10},{horizontal:'center',vertical:'middle',wrapText:true});
   full(3,'紅底＝有異常　綠底＝無異常(OK)　空白＝未檢　｜　中間為正面，由內而外依序為 側牆 → PL面　｜　S/P 編號由上方起順時針',18,{name:FONT,size:9,color:{argb:'FF555555'}},{horizontal:'center',vertical:'middle'});
   // 文字格高度依内容自动加高（避免内容被截掉）
@@ -590,7 +606,7 @@ function importBackup(){
  i.onchange=async()=>{const f=i.files[0];i.remove();if(!f)return;
   try{const o=JSON.parse(await f.text());if(!o.S||o.S.v!==2||!o.photos)throw 0;
    if(!(await ask('导入将覆盖目前手机上的资料，确定吗？','覆盖导入',true)))return;
-   await wipe();S={v:2,meta:dMeta(),samples:[1],cur:1,zones:{},unit:'cm'};adopt(o.S);Object.keys(o.photos).forEach(id=>{photos[id]=o.photos[id];putPhoto(id)});save();toast('已导入');location.hash='#/';render()}
+   await wipe();S=newS();adopt(o.S);Object.keys(o.photos).forEach(id=>{photos[id]=o.photos[id];putPhoto(id)});save();toast('已导入');location.hash='#/';render()}
   catch(e){toast('备份文件无法读取（或为旧版本）')}};
  document.body.appendChild(i);i.click();
 }
@@ -611,10 +627,14 @@ document.addEventListener('click',e=>{
  else if(a==='spick'){const k=t.dataset.k,v=t.dataset.v;S.meta[k]=(k==='color'&&S.meta[k]===v)?'':v;save();render()}
  else if(a==='mpick'){const arr=S.meta[t.dataset.k],v=t.dataset.v,i=arr.indexOf(v);if(i>=0)arr.splice(i,1);else arr.push(v);save();render()}
  else if(a==='cur'){S.cur=Number(t.dataset.n);save();render()}
- else if(a==='addS'){const n=Math.max.apply(null,S.samples)+1;S.samples.push(n);S.cur=n;save();render()}
- else if(a==='delS'){const n=S.cur;ask('确定删除样品 #'+n+' 的所有记录和照片？','删除',true).then(ok=>{if(!ok)return;
+ else if(a==='addS'){const id=Math.max.apply(null,S.samples)+1,used=S.samples.map(x=>slab(x).toLowerCase());let n=1;while(used.includes(String(n)))n++;
+  S.samples.push(id);S.labels[id]=String(n);sortS();S.cur=id;save();render()}
+ else if(a==='renS'){const n=S.cur;askText('修改样品编号（最多 8 个字，可填文字，例如 A12）',slab(n),v=>{
+   if(!v)return '请输入编号';
+   if(S.samples.some(x=>x!==n&&slab(x).toLowerCase()===v.toLowerCase()))return '这个编号已存在，请换一个';return ''}).then(v=>{if(v===null)return;S.labels[n]=v;sortS();save();render()})}
+ else if(a==='delS'){const n=S.cur;ask('确定删除样品 #'+slab(n)+' 的所有记录和照片？','删除',true).then(ok=>{if(!ok)return;
   Object.keys(S.zones).forEach(k=>{if(k.split('|')[0]===String(n)){S.zones[k].entries.forEach(en=>en.photos.forEach(delPhoto));delete S.zones[k]}});
-  S.samples=S.samples.filter(x=>x!==n);S.cur=S.samples[0];save();render()})}
+  S.samples=S.samples.filter(x=>x!==n);delete S.labels[n];S.cur=S.samples[0];save();render()})}
  else if(a==='okZone'){const r=zensure(s,f,z);r.ok=!r.ok;save();
   if(r.ok){const i=ALLZ.findIndex(x=>x.g===f&&x.z===z),nx=ALLZ[i+1];location.replace(nx?'#/zone/'+s+'/'+nx.g+'/'+nx.z:'#/')}else render()}
  else if(a==='allok'){const g=grp(f);let k=0;g.codes.forEach(zz=>{if(zst(S.cur,f,zz)==='u'){zensure(S.cur,f,zz).ok=true;k++}});save();toast(k?'已标记 '+k+' 个区域无异常':'没有未检区域');render()}
@@ -635,7 +655,7 @@ document.addEventListener('click',e=>{
  else if(a==='share')exportXlsx(true);
  else if(a==='bk')backup();
  else if(a==='imp')importBackup();
- else if(a==='reset'){ask('将清空本机所有照片和记录（建议先导出）。确定吗？','清空',true).then(ok=>{if(!ok)return;wipe().then(()=>{S={v:2,meta:dMeta(),samples:[1],cur:1,zones:{},unit:'cm'};save();toast('已清空');location.hash='#/';render()})})}
+ else if(a==='reset'){ask('将清空本机所有照片和记录（建议先导出）。确定吗？','清空',true).then(ok=>{if(!ok)return;wipe().then(()=>{S=newS();save();toast('已清空');location.hash='#/';render()})})}
 });
 
 /* ---------------- 启动 ---------------- */
